@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sorteio de Pratos – Confraternização de Natal</title>
+<style>
+  :root{--bg:#fff8f0;--card:#fff;--red:#b3202a;--green:#1f6b45;--text:#2b2b2b;--muted:#6b6b6b;--line:#eadfd3}
+  @media (prefers-color-scheme:dark){:root{--bg:#1b1412;--card:#262019;--text:#f3ebe3;--muted:#b3a89c;--line:#3a3028;--red:#e0525c;--green:#4fb583}}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
+  main{max-width:640px;margin:0 auto;padding:32px 16px 48px}
+  h1{text-align:center;color:var(--red);font-size:1.8rem;margin:0 0 4px}
+  .sub{text-align:center;color:var(--muted);margin:0 0 24px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:20px}
+  label{font-weight:600;display:block;margin-bottom:6px}
+  input{width:100%;padding:12px;font-size:1rem;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--text)}
+  button{width:100%;margin-top:12px;padding:14px;font-size:1.05rem;font-weight:700;color:#fff;background:var(--red);border:0;border-radius:8px;cursor:pointer}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  #msg{margin-top:12px;font-size:.95rem}
+  .err{color:var(--red)}
+  .warn{background:#fff3cd;color:#5c4400;border-radius:8px;padding:10px;font-size:.85rem;margin-bottom:16px}
+  #resultado{text-align:center;display:none;border:2px solid var(--green)}
+  #resultado .prato{font-size:1.6rem;font-weight:800;color:var(--green);margin:6px 0}
+  h2{font-size:1.15rem;margin:0 0 12px}
+  ul{list-style:none;padding:0;margin:0}
+  li{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
+  li:last-child{border-bottom:0}
+  li span:last-child{color:var(--green);font-weight:600;text-align:right}
+  .vazio{color:var(--muted)}
+</style>
+</head>
+<body>
+<main>
+  <h1>🎄 Sorteio de Pratos</h1>
+  <p class="sub">Confraternização de Natal da turma</p>
+
+  <div id="aviso" class="warn" hidden>
+    ⚠️ Modo de teste: o Firebase ainda não foi configurado, então os dados ficam salvos só neste navegador.
+  </div>
+
+  <section class="card" id="formCard">
+    <label for="casal">Nome do casal</label>
+    <input id="casal" maxlength="60" placeholder="Ex.: João e Maria" autocomplete="off">
+    <button id="btn">🎁 Sortear meu prato</button>
+    <div id="msg"></div>
+  </section>
+
+  <section class="card" id="resultado">
+    <div id="resCasal"></div>
+    <div class="prato" id="resPrato"></div>
+    <div class="vazio">Seu prato está salvo. Não é possível sortear novamente.</div>
+  </section>
+
+  <section class="card">
+    <h2>Pratos já sorteados (<span id="cont">0</span>/<span id="total">0</span>)</h2>
+    <ul id="lista"></ul>
+  </section>
+</main>
+
+<script>
+// ============ CONFIGURAÇÃO ============
+// URL do Firebase Realtime Database (sem barra no final). Exemplo:
+// "https://meu-projeto-default-rtdb.firebaseio.com"
+const FIREBASE_URL = "https://sorteionatal-default-rtdb.firebaseio.com/";
+
+// Edite a lista de pratos à vontade (cada item só pode ser sorteado uma vez).
+const PRATOS = [
+  "1 Cento de salgados" 
+
+];
+// ======================================
+
+const $ = id => document.getElementById(id);
+const norm = s => s.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ");
+const LOCAL_KEY = "sorteio_natal_dados", MEU_KEY = "sorteio_natal_meu";
+const usaFirebase = !!FIREBASE_URL;
+if (!usaFirebase) $("aviso").hidden = false;
+
+async function carregar(){
+  if (usaFirebase){
+    const r = await fetch(`${FIREBASE_URL}/sorteio.json`);
+    if (!r.ok) throw new Error("Falha ao carregar");
+    return (await r.json()) || {};
+  }
+  try { return JSON.parse(localStorage.getItem(LOCAL_KEY)) || {}; } catch { return {}; }
+}
+
+// Reserva o prato somente se ainda não existir (evita dois casais com o mesmo prato)
+async function reservar(idx, registro){
+  if (usaFirebase){
+    const r = await fetch(`${FIREBASE_URL}/sorteio/p${idx}.json`, {
+      method:"PUT", headers:{ "if-match":"null_etag" }, body: JSON.stringify(registro)
+    });
+    if (r.status === 412 || r.status === 401 || r.status === 403) return false;
+    if (!r.ok) throw new Error("Falha ao salvar");
+    return true;
+  }
+  const dados = await carregar();
+  if (dados["p"+idx]) return false;
+  dados["p"+idx] = registro;
+  localStorage.setItem(LOCAL_KEY, JSON.stringify(dados));
+  return true;
+}
+
+function mostrarResultado(casal, prato){
+  $("resCasal").textContent = casal;
+  $("resPrato").textContent = prato;
+  $("resultado").style.display = "block";
+  $("formCard").style.display = "none";
+}
+
+function render(dados){
+  const itens = Object.values(dados).sort((a,b)=>(a.ts||0)-(b.ts||0));
+  $("cont").textContent = itens.length;
+  $("total").textContent = PRATOS.length;
+  const ul = $("lista"); ul.innerHTML = "";
+  if (!itens.length){
+    const li = document.createElement("li");
+    li.className = "vazio"; li.textContent = "Nenhum sorteio realizado ainda.";
+    ul.appendChild(li); return;
+  }
+  itens.forEach(i=>{
+    const li = document.createElement("li");
+    const a = document.createElement("span"), b = document.createElement("span");
+    a.textContent = i.casal; b.textContent = i.prato;
+    li.append(a,b); ul.appendChild(li);
+  });
+}
+
+function erro(t){ $("msg").className = "err"; $("msg").textContent = t; }
+
+async function atualizar(){
+  try {
+    const dados = await carregar();
+    render(dados);
+    const meu = localStorage.getItem(MEU_KEY);
+    if (meu){
+      const reg = Object.values(dados).find(d => norm(d.casal) === meu);
+      if (reg) mostrarResultado(reg.casal, reg.prato);
+    }
+    return dados;
+  } catch { erro("Não foi possível carregar os dados. Tente recarregar a página."); }
+}
+
+$("btn").addEventListener("click", async () => {
+  const nome = $("casal").value.trim();
+  $("msg").textContent = "";
+  if (nome.length < 3) return erro("Digite o nome do casal.");
+  $("btn").disabled = true;
+  try {
+    const dados = await carregar();
+    const chave = norm(nome);
+
+    if (localStorage.getItem(MEU_KEY) || Object.values(dados).some(d => norm(d.casal) === chave)){
+      await atualizar();
+      return erro("Este casal já realizou o sorteio. Não é permitido sortear novamente.");
+    }
+
+    let livres = PRATOS.map((_,i)=>i).filter(i => !dados["p"+i]);
+    while (livres.length){
+      const idx = livres[Math.floor(Math.random()*livres.length)];
+      const ok = await reservar(idx, { casal: nome, prato: PRATOS[idx], ts: Date.now() });
+      if (ok){
+        localStorage.setItem(MEU_KEY, chave);
+        mostrarResultado(nome, PRATOS[idx]);
+        await atualizar();
+        return;
+      }
+      livres = livres.filter(i => i !== idx); // alguém levou antes; tenta outro
+    }
+    erro("Todos os pratos já foram sorteados!");
+  } catch { erro("Erro ao sortear. Tente novamente."); }
+  finally { $("btn").disabled = false; }
+});
+
+atualizar();
+setInterval(atualizar, 15000); // mantém a lista atualizada para todos
+</script>
+</body>
+</html>
